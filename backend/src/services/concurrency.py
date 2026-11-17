@@ -1,5 +1,6 @@
 """Real PostgreSQL row-lock experiment. Events coordinate two database connections; no timing simulation."""
 import threading,time,hashlib,json
+from datetime import datetime, timezone
 from sqlalchemy import text,select
 from src.config.database import engine,Session
 from src.models.entities import Trial,Transfer,TrialBalance,Receipt,Sample
@@ -52,5 +53,5 @@ def execute(trial_id):
         invariant=balance.remaining+balance.received==initial and balance.remaining>=0 and len(receipts)==1 and receipts[0].actor=='A'
         result={'mode':'真实 PostgreSQL / 隔离样本镜像账本','sample':sample.code,'initial':initial,'transfer_quantity':qty,'remaining':balance.remaining,'received':balance.received,'receipt_count':len(receipts),'invariant_passed':invariant,'traces':traces,'sql':['SELECT ... FOR UPDATE','SET LOCAL lock_timeout','INSERT INTO receipts','UPDATE trial_balances','ROLLBACK / COMMIT'],'formula':'remaining + received = initial；A 回执 1 条，B 回执回滚为 0 条'}
         result['checksum']=hashlib.sha256(json.dumps(result,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
-        trial=db.get(Trial,trial_id);trial.result=result;trial.status='completed' if invariant else 'failed';db.commit()
+        trial=db.get(Trial,trial_id);trial.result=result;trial.status='completed' if invariant else 'failed';trial.finished_at=datetime.now(timezone.utc);db.commit()
         return result

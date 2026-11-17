@@ -14,5 +14,5 @@ import json
 def detail(ident:int,db=Depends(db_session),user=Depends(current)): return service.detail(db,ident)
 @router.get('/trials/{ident}/export')
 def export(ident:int,db=Depends(db_session),user=Depends(current)):
-    obj=service.detail(db,ident)
+    obj=service.export_payload(db,ident)
     return Response(json.dumps(obj,ensure_ascii=False,indent=2),media_type='application/json',headers={'Content-Disposition':f'attachment; filename="trial-{ident}.json"'})

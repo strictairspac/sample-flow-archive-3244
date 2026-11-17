@@ -1,0 +1,7 @@
+import {table} from '../components/common/table.js';
+import {badge} from '../components/common/badge.js';
+import {esc,date} from '../utils/html.js';
+import {session} from '../hooks/session.js';
+export function archivesPage(items){
+const rows=items.map(a=>[`<strong>${esc(a.code)}</strong><small>${date(a.created_at)}</small>`,date(a.cutoff),badge(a.status),`${a.trial_count} 场<small>${(a.trial_ids||[]).map(i=>'#'+i).join(' ')||'无'}</small>`,a.checksum?`<code class="checksum">${esc(a.checksum.slice(0,16))}…</code>`:'—',a.error?`<span class="error-text">${esc(a.error)}</span>`:'—',a.status!=='archived'&&a.trial_count>0?`<button class="link" data-retry="${a.id}" ${session.user.role==='viewer'?'disabled':''}>重试 ↻</button>`:'']);
+return `<div class="split"><section><div class="section-top"><h2>归档批次</h2><span>${items.length} 批 / 校验落盘后清理</span></div>${table(['批次 / 发起时间','截止时间','状态','圈定演练','SHA256','失败原因','操作'],rows)}<div class="protocol"><h3>归档协议</h3><ol><li>发起时圈定截止时间前已结束的演练，之后才结束的不纳入，日常演练照常执行</li><li>证据文件整体落盘并校验 SHA256，通过后才清理结果、演练账与回执</li><li>保留演练编号与原下载入口，归档前后下载内容一致</li><li>中断后可重试，续跑原批次，不重复清理与记审计；文件缺失或被篡改时明确报错</li></ol></div></section><section class="form-panel"><span class="eyebrow">EVIDENCE ARCHIVE</span><h2>发起归档</h2><form id="archive-form"><label>截止时间（此前已结束的演练纳入归档）<input name="cutoff" type="datetime-local" required></label><button class="primary" ${session.user.role==='viewer'?'disabled':''}>圈定并归档 ↗</button></form><p class="help">并发批次圈中同一演练时仅归档一份；归档期间新演练照常入队执行。</p></section></div>`;}

@@ -10,6 +10,7 @@
 - 流转申请：关联样本、指定数量和接收实验室。
 - 并发执行：Redis 队列、独立 Python worker、可设锁等待上限。
 - 冲突证据：Backend PID、SQLSTATE、回执回滚、数量守恒与 JSON 导出。
+- 证据归档：按截止时间圈定已结束演练，校验落盘后清理结果、演练账与回执。
 - 管理员审计：登录、写入和执行动作。
 
 ## 启动
@@ -40,6 +41,14 @@ docker compose exec -T backend python -m scripts.seed_demo
 
 单 worker 顺序运行任务，无生产重试/崩溃恢复调度；worker中断时 running 任务需要人工重建，不能用作生产样本库存扣减。
 
+## 归档流程
+
+演练证据长期堆在数据库里，归档按截止时间搬迁：发起时圈定 `finished_at <= 截止时间` 且已结束（completed/failed）的演练，固化为 `archive_items` 批次物品；之后才结束的演练不纳入，日常演练照常入队执行（演练队列优先于归档队列）。`archive_items.trial_id` 全局唯一并配合 `ON CONFLICT DO NOTHING`，两个并发批次圈中同一演练时仅归档一份。
+
+处理流程：证据文件（含每场演练的导出口径、演练账、回执）原子落盘到 `ARTIFACTS_DIR/archives/` → 重读校验 SHA256 与完整性 → 校验通过才逐场清理结果、演练账与回执（每场一个事务，`archived` 标记与清理同事务提交，下载不会落到空证据）→ 条件更新置 `archived`，完成审计仅记一次。批次物品已持久化，任意时刻中断都可重试续跑原批次：已清理的跳过不重复清理，重试不重复记审计；同批次处理用 advisory lock 防并发。
+
+演练编号与 `/trials/{id}/export` 下载入口保留：未归档走库内实时数据，已归档从归档文件回放，归档前后下载内容一致。清理后文件缺失返回 410、被篡改返回 422，绝不返回空证据或成功下载。页面可发起归档并查看待归档、处理中、已归档与失败原因。
+
 ## 工程说明
 
 |服务|技术|职责|
@@ -50,10 +59,10 @@ docker compose exec -T backend python -m scripts.seed_demo
 |db|PostgreSQL16|业务数据、隔离镜像账本|
 |redis|Redis7|持久队列|
 
-目录：`frontend/src/{api,stores,types,components/common,hooks,pages,router,utils,constants}`；`backend/src/{routes,controllers,services,models,schemas,middlewares,utils,constants,config}`；`backend/scripts/seed_demo.py`；`backend/migrations/001_initial.sql`。
-核心实体 Sample、Transfer、Trial 各有模型、schema、服务、路由、API、store与页面；共享 table/badge/frame 组件。共享枚举 roles/run states 位于后端 `src/constants/enums.py`、模型/权限引用和前端 `src/constants/enums.js`、frame/badge；状态枚举 queued/running/completed/failed。两个后端中间件：request_id/errors。
+目录：`frontend/src/{api,stores,types,components/common,hooks,pages,router,utils,constants}`；`backend/src/{routes,controllers,services,models,schemas,middlewares,utils,constants,config}`；`backend/scripts/seed_demo.py`；`backend/migrations/001_initial.sql`、`002_archive.sql`。
+核心实体 Sample、Transfer、Trial 各有模型、schema、服务、路由、API、store与页面；Archive 复用共享组件。共享 table/badge/frame 组件。共享枚举 roles/run states/archive states 位于后端 `src/constants/enums.py`、模型/权限引用和前端 `src/constants/enums.js`、frame/badge；演练状态枚举 queued/running/completed/failed，归档状态 pending/processing/archived/failed。两个后端中间件：request_id/errors。
 
-环境变量见 `.env.example`：COMPOSE_PROJECT_NAME、三端口、DB_PASSWORD、JWT_SECRET、SEED_DEMO。默认密码仅用于本地演示；JWT8小时有效。seed按自然键仅插入缺失行，不覆盖修改。所有5服务有健康检查，backend/worker依赖健康数据库/Redis，frontend依赖backend；db/redis/artifacts使用命名卷。停止及清空本项目数据：`docker compose down -v --remove-orphans`。
+环境变量见 `.env.example`：COMPOSE_PROJECT_NAME、三端口、DB_PASSWORD、JWT_SECRET、SEED_DEMO；归档目录可用 ARTIFACTS_DIR 覆盖（默认 /artifacts）。默认密码仅用于本地演示；JWT8小时有效。seed按自然键仅插入缺失行，不覆盖修改。所有5服务有健康检查，backend/worker依赖健康数据库/Redis，frontend依赖backend；db/redis/artifacts使用命名卷。停止及清空本项目数据：`docker compose down -v --remove-orphans`。
 
 本地开发：Python3.11安装 backend/requirements.txt；设置 DATABASE_URL/REDIS_URL 后 `uvicorn src.main:app --reload`（backend目录）；worker `python -m src.worker`；前端用Nginx同源代理后端。前端双字体经Google Fonts加载，离线使用浏览器字体回退；业务不依赖外部字体。
 
